@@ -10,14 +10,20 @@ import yfinance as yf
 from engine import analyze
 
 # ---------- config (override via repo Secrets / env) ----------
-TOP_N     = int(os.getenv("TOP_N", "8"))
-LOOKBACK  = int(os.getenv("LOOKBACK", "90"))
-MIN_R2    = float(os.getenv("MIN_R2", "0.55"))   # trend-clarity gate
-MIN_ADX   = float(os.getenv("MIN_ADX", "18"))    # trend-strength gate
-MIN_TMPL  = float(os.getenv("MIN_TMPL", "0.70")) # MA-stack agreement gate
-COIL_MIN  = float(os.getenv("COIL_MIN", "0.60"))   # 🦋 min compression to list
-RIPPLE_LAG     = int(os.getenv("RIPPLE_LAG", "5"))       # 🦋 max lead-lag days
-RIPPLE_MINCORR = float(os.getenv("RIPPLE_MINCORR", "0.30"))  # 🦋 min corr to report
+def _env(name, default):
+    """Return env var, but fall back to default if unset OR empty string
+    (GitHub passes '' for undefined `vars.*`)."""
+    v = os.getenv(name)
+    return v if v not in (None, "") else default
+
+TOP_N     = int(_env("TOP_N", "8"))
+LOOKBACK  = int(_env("LOOKBACK", "90"))
+MIN_R2    = float(_env("MIN_R2", "0.55"))   # trend-clarity gate
+MIN_ADX   = float(_env("MIN_ADX", "18"))    # trend-strength gate
+MIN_TMPL  = float(_env("MIN_TMPL", "0.70")) # MA-stack agreement gate
+COIL_MIN  = float(_env("COIL_MIN", "0.60"))   # 🦋 min compression to list
+RIPPLE_LAG     = int(_env("RIPPLE_LAG", "5"))       # 🦋 max lead-lag days
+RIPPLE_MINCORR = float(_env("RIPPLE_MINCORR", "0.30"))  # 🦋 min corr to report
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 CHAT_ID   = os.getenv("TELEGRAM_CHAT_ID", "")
 
