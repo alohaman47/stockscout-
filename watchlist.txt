@@ -1,0 +1,27 @@
+# ── วิธีใช้: ใส่ ticker บรรทัดละตัว. ข้อความหลัง # คือคอมเมนต์ ──
+# US ไม่ต้องใส่ suffix | ไทย=.BK | ฮ่องกง=.HK | จีน=.SS/.SZ | ญี่ปุ่น=.T | เกาหลี=.KS | ไต้หวัน=.TW
+
+# ===== US =====
+AAPL
+MSFT
+NVDA
+AMZN
+META
+GOOGL
+TSLA
+AMD
+AVGO
+NFLX
+
+# ===== ไทย (SET) =====
+PTT.BK
+DELTA.BK
+ADVANC.BK
+CPALL.BK
+KBANK.BK
+AOT.BK
+
+# ===== ฮ่องกง =====
+0700.HK
+9988.HK
+3690.HK
