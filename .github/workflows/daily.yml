@@ -1,0 +1,39 @@
+name: StockScout Daily
+
+on:
+  schedule:
+    # 21:30 UTC = 04:30 เวลาไทย (จ.–ศ.) หลังตลาด US ปิด
+    - cron: '30 21 * * 1-5'
+  workflow_dispatch:        # กดรันเองได้จากแท็บ Actions
+
+permissions:
+  contents: write           # ให้ commit ไฟล์ report กลับเข้า repo ได้
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+      - run: pip install -r requirements.txt
+      - name: Run StockScout
+        env:
+          TOP_N:    ${{ vars.TOP_N }}
+          MIN_R2:   ${{ vars.MIN_R2 }}
+          MIN_ADX:  ${{ vars.MIN_ADX }}
+          MIN_TMPL: ${{ vars.MIN_TMPL }}
+          # (ออปชัน) ใส่ทีหลังถ้าอยากได้ Telegram ด้วย:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID:   ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python main.py
+      - name: Commit report
+        run: |
+          git config user.name  "stockscout-bot"
+          git config user.email "actions@github.com"
+          git add reports/
+          git commit -m "report: $(date -u +%Y-%m-%d)" || echo "no changes"
+          git push || echo "nothing to push"
