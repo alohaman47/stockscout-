@@ -57,8 +57,10 @@ def regression_momentum(close, lookback=90):
     ss_res = np.sum(resid**2)
     ss_tot = np.sum((y - y.mean())**2)
     r2 = 1 - ss_res/ss_tot if ss_tot > 0 else 0.0
-    ann_slope = (np.exp(b)**252 - 1)     # annualized
-    return ann_slope, r2, ann_slope * r2
+    ann_raw = np.exp(b * 252) - 1        # annualized (continuously compounded)
+    # clip: extrapolating a steep 90d slope to a year explodes; cap at +/-300%/yr
+    ann = float(np.clip(ann_raw, -3.0, 3.0))
+    return ann, r2, ann * r2
 
 
 # ---------- Minervini-style trend template (graded 0..1) ----------
