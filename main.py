@@ -26,6 +26,8 @@ A_MIN_ADX = float(_env("A_MIN_ADX", "25"))   # ⭐ A+ strength bar
 COIL_MIN  = float(_env("COIL_MIN", "0.60"))   # 🦋 min compression to list
 RIPPLE_LAG     = int(_env("RIPPLE_LAG", "5"))       # 🦋 max lead-lag days
 RIPPLE_MINCORR = float(_env("RIPPLE_MINCORR", "0.30"))  # 🦋 min corr to report
+RIPPLE_MAX_N   = int(_env("RIPPLE_MAX_N", "60"))    # 🦋 skip ripple if universe bigger (O(n^2))
+CHUNK          = int(_env("CHUNK", "100"))          # batch size for yfinance download
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 CHAT_ID   = os.getenv("TELEGRAM_CHAT_ID", "")
 
@@ -50,27 +52,49 @@ def load_watchlist(path="watchlist.txt"):
     return out
 
 # ---------- fetch + score ----------
+def _extract(data, t, single):
+    """Pull one ticker's OHLCV frame out of a yf.download result."""
+    if single:
+        df = data.copy()
+        df.columns = [c[0] if isinstance(c, tuple) else c for c in df.columns]
+    else:
+        if t not in data.columns.get_level_values(0):
+            return None
+        df = data[t].copy()
+    df = df.dropna(how="all")
+    if df.empty or "Close" not in df.columns:
+        return None
+    return df
+
 def scan(tickers):
     rows, panel = [], {}
-    for t in tickers:
+    for i in range(0, len(tickers), CHUNK):
+        batch = tickers[i:i+CHUNK]
         try:
-            df = yf.download(t, period="2y", interval="1d",
-                             auto_adjust=True, progress=False, threads=False)
-            if df is None or df.empty:
-                print(f"  ! no data: {t}"); continue
-            df.columns = [c[0] if isinstance(c, tuple) else c for c in df.columns]
-            panel[t] = df['Close']
-            r = analyze(df, LOOKBACK)
-            if r is None:
-                print(f"  ! short history: {t}"); continue
-            r["ticker"] = t
-            r["market"] = market_of(t)
-            rows.append(r)
-            print(f"  ok {t:10s} {r['direction']:4s} mom={r['mom']:+.3f} "
-                  f"r2={r['r2']:.2f} adx={r['adx']:.0f} H={r['hurst']:.2f} coil={r['coil']:.2f}")
+            data = yf.download(batch, period="2y", interval="1d", auto_adjust=True,
+                               progress=False, group_by="ticker", threads=True)
         except Exception as e:
-            print(f"  ! error {t}: {e}")
-        time.sleep(0.4)
+            print(f"  ! batch {i//CHUNK+1} download error: {e}"); continue
+        if data is None or data.empty:
+            print(f"  ! batch {i//CHUNK+1}: no data"); continue
+        single = len(batch) == 1
+        for t in batch:
+            try:
+                df = _extract(data, t, single)
+                if df is None:
+                    continue
+                panel[t] = df["Close"]
+                r = analyze(df, LOOKBACK)
+                if r is None:
+                    continue
+                r["ticker"] = t
+                r["market"] = market_of(t)
+                rows.append(r)
+            except Exception as e:
+                print(f"  ! {t}: {e}")
+        print(f"  batch {i//CHUNK+1}/{(len(tickers)+CHUNK-1)//CHUNK}: "
+              f"{len(rows)} scored so far")
+        time.sleep(1.5)
     return rows, panel
 
 def entry_tag(r):
@@ -161,9 +185,13 @@ def build_report(rows, panel=None):
     dns  = sorted([r for r in good if r["direction"]=="DOWN"], key=lambda x: x["mom"])[:TOP_N]
     aplus = [r for r in good if is_a_plus(r)]
     aplus.sort(key=lambda x: (x["direction"] != "UP", -abs(x["mom"])))  # ups first, strongest first
+    # per-market breakdown of what was actually scanned
+    from collections import Counter
+    mk = Counter(r["market"] for r in rows)
+    mk_str = " · ".join(f"{m} {n}" for m, n in mk.most_common())
     today = dt.datetime.now().strftime("%Y-%m-%d %H:%M UTC")
     md  = f"# 📡 StockScout — {today}\n\n"
-    md += (f"สแกน **{len(rows)}** ตัว · ผ่านเกณฑ์ **{len(good)}** · "
+    md += (f"สแกน **{len(rows)}** ตัว ({mk_str}) · ผ่านเกณฑ์ **{len(good)}** · "
            f"⭐ A+ **{len(aplus)}** "
            f"(R²≥{MIN_R2} · ADX≥{MIN_ADX:.0f} · template≥{MIN_TMPL}) · "
            f"🦋H=Hurst (ไปต่อ/หลอก)\n\n")
@@ -186,12 +214,16 @@ def build_report(rows, panel=None):
     # 🦋 butterfly modes
     md += "## 🦋 จุดชนวน — ขดตัวรอระเบิด (Coiled Spring)\n\n"
     md += coil_section(rows) + "\n"
-    if panel:
+    if panel and len(panel) <= RIPPLE_MAX_N:
         from butterfly import ripple_network
         rel = ripple_network(panel, max_lag=RIPPLE_LAG,
                              min_corr=RIPPLE_MINCORR, top=TOP_N)
         md += "## 🦋 แรงกระเพื่อม — ตัวนำนำตัวตาม (Ripple)\n\n"
         md += ripple_section(rel, {r["ticker"]: r for r in rows}) + "\n"
+    elif panel:
+        md += "## 🦋 แรงกระเพื่อม — ตัวนำนำตัวตาม (Ripple)\n\n"
+        md += (f"_— ปิดอัตโนมัติ: universe ใหญ่ ({len(panel)} ตัว > {RIPPLE_MAX_N}) "
+               f"การวิเคราะห์ lead-lag เป็น O(n²) จะช้าเกินไป —_\n\n")
 
     md += ("---\n*Score = ความชันรายปี × R² · Coil = ระดับการบีบอัด (สูง=ขดแน่น) · "
            "Hurst>0.5=เทรนด์ไปต่อ, <0.5=มีแนวโน้มเด้งกลับ · "
@@ -232,7 +264,8 @@ def send_telegram(md):
             print(f"  telegram error: {e}")
 
 def main():
-    tickers = load_watchlist()
+    from universe import expand
+    tickers = expand(load_watchlist())
     print(f"scanning {len(tickers)} tickers ...")
     rows, panel = scan(tickers)
     if not rows:
