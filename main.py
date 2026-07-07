@@ -21,6 +21,8 @@ LOOKBACK  = int(_env("LOOKBACK", "90"))
 MIN_R2    = float(_env("MIN_R2", "0.55"))   # trend-clarity gate
 MIN_ADX   = float(_env("MIN_ADX", "18"))    # trend-strength gate
 MIN_TMPL  = float(_env("MIN_TMPL", "0.70")) # MA-stack agreement gate
+A_MIN_R2  = float(_env("A_MIN_R2", "0.70"))  # ⭐ A+ clarity bar
+A_MIN_ADX = float(_env("A_MIN_ADX", "25"))   # ⭐ A+ strength bar
 COIL_MIN  = float(_env("COIL_MIN", "0.60"))   # 🦋 min compression to list
 RIPPLE_LAG     = int(_env("RIPPLE_LAG", "5"))       # 🦋 max lead-lag days
 RIPPLE_MINCORR = float(_env("RIPPLE_MINCORR", "0.30"))  # 🦋 min corr to report
@@ -84,6 +86,19 @@ def passes(r):
     return (r["r2"] >= MIN_R2 and r["adx"] >= MIN_ADX
             and r["template"] >= MIN_TMPL)
 
+def is_entry_zone(r):
+    """Ideal timing: pull back in an uptrend, or sell a bounce in a downtrend."""
+    if r["direction"] == "UP":
+        return 2 <= r["pull_pct"] <= 12 and r["rsi"] < 60
+    return r["pull_pct"] <= 6 and 40 <= r["rsi"] <= 62
+
+def is_a_plus(r):
+    """⭐ A+: clean + persistent + strong + at a good entry, all at once."""
+    return (not _nan(r.get("r2")) and r["r2"] >= A_MIN_R2
+            and r.get("hurst_tag") == "ไปต่อ"
+            and not _nan(r.get("adx")) and r["adx"] >= A_MIN_ADX
+            and is_entry_zone(r))
+
 # ---------- markdown report ----------
 def table(rows):
     if not rows:
@@ -95,7 +110,8 @@ def table(rows):
         stop = r["price"]-2*r["atr"] if r["direction"]=="UP" else r["price"]+2*r["atr"]
         risk = abs(r["price"]-stop)/r["price"]*100
         hcell = f"{r['hurst']:.2f} {r['hurst_tag']}" if not _nan(r['hurst']) else "—"
-        body += (f"| **{r['ticker']}** | {r['market']} | {r['mom']:+.2f} | "
+        star = "⭐ " if is_a_plus(r) else ""
+        body += (f"| {star}**{r['ticker']}** | {r['market']} | {r['mom']:+.2f} | "
                  f"{r['r2']:.2f} | {hcell} | {r['adx']:.0f} | {r['ann']*100:+.0f}% | "
                  f"{r['price']:.2f} | {stop:.2f} ({risk:.1f}%) | {entry_tag(r)} |\n")
     return head + body
@@ -143,11 +159,27 @@ def build_report(rows, panel=None):
     good = [r for r in rows if passes(r)]
     ups  = sorted([r for r in good if r["direction"]=="UP"],   key=lambda x:-x["mom"])[:TOP_N]
     dns  = sorted([r for r in good if r["direction"]=="DOWN"], key=lambda x: x["mom"])[:TOP_N]
+    aplus = [r for r in good if is_a_plus(r)]
+    aplus.sort(key=lambda x: (x["direction"] != "UP", -abs(x["mom"])))  # ups first, strongest first
     today = dt.datetime.now().strftime("%Y-%m-%d %H:%M UTC")
     md  = f"# 📡 StockScout — {today}\n\n"
-    md += (f"สแกน **{len(rows)}** ตัว · ผ่านเกณฑ์ **{len(good)}** "
+    md += (f"สแกน **{len(rows)}** ตัว · ผ่านเกณฑ์ **{len(good)}** · "
+           f"⭐ A+ **{len(aplus)}** "
            f"(R²≥{MIN_R2} · ADX≥{MIN_ADX:.0f} · template≥{MIN_TMPL}) · "
            f"🦋H=Hurst (ไปต่อ/หลอก)\n\n")
+
+    # ⭐ A+ setups — the only section that says "พร้อมเข้า"
+    md += "## ⭐ A+ Setups — พร้อมเข้าที่สุด\n\n"
+    if aplus:
+        md += table(aplus)
+        md += ("\n> เกณฑ์ A+ = R²≥%.2f **และ** Hurst ไปต่อ **และ** ADX≥%.0f **และ** อยู่โซนเข้า "
+               "→ ผ่านครบ 4 ชั้นพร้อมกัน ยังต้องยืนยันด้วยกราฟ+วาง SL เอง\n" % (A_MIN_R2, A_MIN_ADX))
+    else:
+        md += ("_— วันนี้ยังไม่มีตัวเข้าเกณฑ์ A+ —_\n\n"
+               "> ปกติมาก ส่วนใหญ่ของวันจะว่าง เพราะรอ**จังหวะย่อ**ของตัวคุณภาพดี "
+               "ดูตารางเทรนด์ข้างล่างแล้วเฝ้าตัวที่ Hurst=ไปต่อ + R² สูง รอมันพลิกเป็น 'โซนย่อ—น่าเข้า'\n")
+    md += "\n"
+
     md += f"## 🟢 ขาขึ้นชัดสุด (Top {len(ups)})\n\n" + table(ups) + "\n"
     md += f"## 🔴 ขาลงชัดสุด (Top {len(dns)})\n\n" + table(dns) + "\n"
 
